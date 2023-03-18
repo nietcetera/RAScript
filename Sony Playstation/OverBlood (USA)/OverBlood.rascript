@@ -304,7 +304,7 @@ room_timed_door = 0x79
 room_laboratory_hallway = 0x0c
 room_laboratory = 0x0d
 room_railway = 0x0f
-room_vent_control = 0x12
+room_vent_control = 0x0b
 room_atrium = 0x13
 room_laptop_quarters = 0x84
 room_virus_extraction = 0x1d
@@ -431,6 +431,7 @@ function item_idcard() => bit0(0x0EECDA)
 //          Bit 6 - Unlocked doors from Control Room
 //          Bit 7 - Entered the passcode
 function event_player_control() => bit0(0x0EF1A1)
+function event_aux_power() => bit1(0x0EF1A1)
 function event_door_control() => bit2(0x0EF1A1)
 function event_obtained_jacket() => bit4(0x0EF1A1)
 
@@ -788,7 +789,7 @@ achievement_trigger_event(
     event_used_chip
 )
 achievement_trigger_event(
-    "Into the Sunset",
+    "Lystran no Longer",
     10,
     "Complete the game.",
     room_hangar,
@@ -832,20 +833,22 @@ achievement_got_item("Top Heavy", room_statue, item_anti_gravity, "Anti-Gravity 
 achievement_got_item("Ay-Ar-En-Ay", room_laboratory, item_capsule, "Capsule")
 
 // One-off achievement for opening all 3 vents in the vent puzzle
-achievement(
-    title = "Emergency Meeting",
-    description = "Open all three vents for Raz.",
-    points = 2,
-    trigger = current_room() == room_vent_control &&
-              event_left_vent() == 0 &&
-              event_middle_vent() == 0 &&
-              event_right_vent() == 0 &&
-              (
-                  prev(event_left_vent()) == 1 ||
-                  prev(event_middle_vent()) == 1 ||
-                  prev(event_right_vent()) == 1
-              )
-)
+// SCRAPPED: there is a small chance the player will switch back and forth
+// between characters opening one vent at a time to progress.
+// achievement(
+//     title = "Emergency Meeting",
+//     description = "Open all three vents for Raz.",
+//     points = 2,
+//     trigger = current_room() == room_vent_control &&
+//               event_left_vent() == 0 &&
+//               event_middle_vent() == 0 &&
+//               event_right_vent() == 0 &&
+//               (
+//                   prev(event_left_vent()) == 1 ||
+//                   prev(event_middle_vent()) == 1 ||
+//                   prev(event_right_vent()) == 1
+//               )
+// )
 
 // Use for achievements related to triggering x event,
 // when x is not represented by an event flag.
@@ -978,9 +981,9 @@ function achievement_nodamage(title, location, points, room)
 }
 achievement_nodamage("Lab Battle", "laboratory", 5, room_laboratory)
 achievement_nodamage("Swamp Thing", "sewer hallway", 5, room_sewer_hall)
-achievement_nodamage("Cave Shooter", "cave walkway", 5, room_cave_walkway)
 achievement_nodamage("Nothing Personnel", "personnel quarters", 5, room_personnel_quarters)
 achievement_nodamage("Hovercraft Hoedown", "hovercraft storage", 5, room_hovercraft_storage)
+achievement_nodamage("Cave Shooter", "cave walkway", 5, room_cave_walkway)
 achievement_nodamage("Director's Cut", "director's room", 10, room_director)
 
 // One-off for final boss, slightly different trigger timing
@@ -1018,12 +1021,12 @@ achievement(
 // One-off for finale, different logic
 achievement(
     title = "OverAchiever: Frantic Finale [m]",
-    description = "Complete the finale with 300 or more seconds remaining.",
+    description = "Complete the finale with 250 or more seconds remaining.",
     points = 10,
     trigger = current_room() == room_hangar && 
               event_completed_game() == 1 &&
               prev(event_completed_game()) == 0 &&
-              finale_time() >= 300
+              finale_time() >= 250
 )
 
 // Use for "obtain all of x item type" achievement
@@ -1083,11 +1086,14 @@ achievement(
     points = 25,
     trigger = once(current_room() == room_refrigeration && event_player_control() == 1) &&
               trigger_when(
-                current_room() == room_hangar && 
-                event_completed_game() == 1 &&
-                prev(event_completed_game()) == 0
+                  current_room() == room_hangar && 
+                  event_completed_game() == 1 &&
+                  prev(event_completed_game()) == 0
               ) &&
-              disable_when(perspective() != 2)
+              disable_when(
+                  perspective() != 2 && event_aux_power() == 1,
+                  until=current_room() == title_screen
+              )
 )
 
 // Fists only achievement
@@ -1194,4 +1200,81 @@ rich_presence_display("{0} is in the {1} [⏰: {2}] [🚶: {3}] [🔫: {4}] [�
     rich_presence_lookup("Companion", current_companion(), character_lookup),
     rich_presence_macro("Number", clips_remaining()),
     rich_presence_macro("Number", sprays_remaining())
+)
+
+// Leaderboards
+function leaderboard_fastest_encounter(title, location, room)
+{
+    leaderboard(
+        title="UnderPar: " + title, 
+        description="Complete the " + location + " encounter as fast as possible.",
+        start=current_room() == room && in_combat() == 1 && prev(in_combat()) == 0, 
+        cancel=current_room() == title_screen || current_health() == 0, 
+        submit=current_room() == room && in_combat() == 0 && prev(in_combat()) == 1,
+        value=measured(
+            tally(0,
+                time_one() > prev(time_one())
+            )
+        ),
+        format="FRAMES",
+        lower_is_better=true
+    )    
+}
+leaderboard_fastest_encounter(
+    "Lab Battle",
+    "laboratory",
+    room_laboratory
+)
+leaderboard_fastest_encounter(
+    "Swamp Thing",
+    "sewer hallway",
+    room_sewer_hall
+)
+leaderboard_fastest_encounter(
+    "Nothing Personnel",
+    "personnel quarters",
+    room_personnel_quarters
+)
+leaderboard_fastest_encounter(
+    "Hovercraft Hoedown",
+    "hovercraft storage",
+    room_hovercraft_storage
+)
+leaderboard_fastest_encounter(
+    "Cave Shooter",
+    "cave walkway",
+    room_cave_walkway
+)
+leaderboard_fastest_encounter(
+    "Director's Cut",
+    "director's room",
+    room_director
+)
+
+// One-off for final boss
+leaderboard(
+    title="UnderPar: Nitro Fueled",
+    description="Complete the hangar encounter as fast as possible.",
+    start=current_room() == room_hangar && in_combat() == 1 && prev(in_combat()) == 0,
+    cancel=current_room() == title_screen || current_health() == 0,
+    submit=current_room() == room_hangar && event_completed_game() == 1 && prev(event_completed_game()) == 0,
+    value=measured(
+        tally(0,
+            time_one() > prev(time_one())
+        )
+    ),
+    format="FRAMES",
+    lower_is_better=true
+)
+
+//  Game completion time leaderboard
+leaderboard(
+    title="UnderPar: Lystra Labyrinth",
+    description="Complete the game as fast as possible.",
+    start=current_room() == room_hangar && event_completed_game() == 1 && prev(event_completed_game()) == 0,
+    cancel=always_false(),
+    submit=current_room() == room_hangar && event_completed_game() == 1 && prev(event_completed_game()) == 0,
+    value=elapsed_time(),
+    format="FRAMES",
+    lower_is_better=true
 )
