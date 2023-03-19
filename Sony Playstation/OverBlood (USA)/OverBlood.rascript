@@ -184,6 +184,10 @@ int_switches_one = 0x01
 int_top_floor_one = 0x01
 int_food_one = 0x01
 int_sig_one = 0x01
+int_beat_game_one = 0x00
+int_sterilization_one = 0x01
+int_rock_dodge_one = 0x02
+int_dodge_finished_one = 0x00
 
 // $0EE7DC: [8-bit] Part 2 of ID of interaction being performed
 //          Interactions are unique per room ID (0x0ee7e4)
@@ -202,14 +206,15 @@ int_sig_one = 0x01
 //          0x01 0x10 - "It's a strawberry flavor."
 //          
 //          Hovercraft Event:
-//          0x02 0x0d - Playing the event
-//          0x00 0x0f - "That was close..."
+//          0x02 0x0d - Beginning of event
+//          0x00 0x0f - End of event
 //          
 //          Cave Walkway:
 //          0x01 0x0b - "Milly!"
 //          
 //          Hangar:
 //          0x01 0x0b - Final confrontation
+//          0x00 0x0c - Fried the final boss (beat the game)
 //
 //          Lounge:
 //          0x01 0x11 - "There's a signature here."
@@ -220,6 +225,10 @@ int_switches_two = 0x0c
 int_top_floor_two = 0x0b
 int_food_two = 0x10
 int_sig_two = 0x11
+int_beat_game_two = 0x0c
+int_sterilization_two = 0x0b
+int_rock_dodge_two = 0x0d
+int_dodge_finished_two = 0x0f
 
 // $0EE7E4: [8-bit] Room ID
 //          0x00 - Title/Intro
@@ -318,6 +327,9 @@ room_hovercraft_storage = 0x24
 room_cave_walkway = 0x27
 room_cave_dodge = 0x93
 room_hover_north = 0x28
+room_cafeteria = 0x20
+room_lounge = 0x1b
+room_sterilization = 0x10
 
 // $0EE7E8: [8-bit] Previous Room ID
 
@@ -482,9 +494,9 @@ function event_pipo_death() => bit3(0x0EF1A7)
 //          Bit 2 - "This'll make you feel better"
 //          Bit 4 - Survived the water rush
 //          Bit 5 - Running from explosion
-//          Bit 6 - Survived the explosion
-//          Bit 7 - Survived the train
-function event_survived_explosion() => bit5(0x0EF1A8)
+//          Bit 6 - Explosion has happened
+function event_running_explosion() => bit5(0x0EF1A8)
+function event_explosion() => bit6(0x0EF1A8)
 
 // $0EF1A9: [Events]
 //          Bit 1 - "This may be useful later." Oil can
@@ -594,10 +606,10 @@ function event_antivirus() => bit5(0xEF1B4)
 // $0EF1B7: [Items/Events]
 //          Bit 2 - "All the scientists dead!"
 //          Bit 3 - "This was the security switch!"
-//          Bit 4 - Beat the final boss
+//          Bit 4 - Told Milly to wait for your signal (final boss)
 //          Bit 6 - Clip - Atrium
 //          Bit 7 - Clip - Lounge
-function event_completed_game() => bit4(0x0EF1B7)
+function event_queued_milly() => bit4(0x0EF1B7)
 function item_clip_atrium() => bit6(0x0EF1B7)
 function item_clip_lounge() => bit7(0x0EF1B7)
 
@@ -707,6 +719,7 @@ function clips_remaining() => byte(0x0EF524)
 //          0x00 - 0x09
 function sprays_remaining() => byte(0x0EF534)
 
+// Function for checking that all flags in an array have been complete
 function check_complete(items)
 {
     return sum_of(items, i => prev(i)) == length(items) - 1 &&
@@ -747,13 +760,6 @@ achievement_trigger_event(
     event_pipo_death
 )
 achievement_trigger_event(
-    "Chemical Engineering",
-    2,
-    "Blast a hole through the wall of the railway and survive.",
-    room_railway,
-    event_survived_explosion
-)
-achievement_trigger_event(
     "Deconaminated",
     5,
     "Survive a near-fatal encounter with Milly.",
@@ -788,13 +794,6 @@ achievement_trigger_event(
     room_director,
     event_used_chip
 )
-achievement_trigger_event(
-    "Lystran no Longer",
-    10,
-    "Complete the game.",
-    room_hangar,
-    event_completed_game
-)
 
 // Use when multiple events need to be checked
 function achievement_trigger_event_AND(title, points, description, room, event_one, event_two)
@@ -816,6 +815,17 @@ achievement_trigger_event_AND(
     room_timed_door, 
     event_timed_door_raz,
     event_timed_door_pipo
+)
+
+// One-off, one flag needs to be set and another not set to trigger properly
+achievement(
+    title="Chemical Engineering",
+    description="Blast a hole through the wall of the railway and survive.",
+    points=2,
+    trigger = current_room() == room_railway && 
+              event_running_explosion() == 0 &&
+              event_explosion() == 1 && 
+              prev(event_explosion()) == 0
 )
     
 // Use for achievements with "obtain item" requirement.
@@ -852,13 +862,13 @@ achievement_got_item("Ay-Ar-En-Ay", room_laboratory, item_capsule, "Capsule")
 
 // Use for achievements related to triggering x event,
 // when x is not represented by an event flag.
-function achievement_triggered_interaction(title, description, points, int_one, int_two)
+function achievement_triggered_interaction(title, description, points, room, int_one, int_two)
 {
     achievement(
         title = title,
         description = description,
         points = points,
-        trigger = current_room() == room_cloning_entrance &&
+        trigger = current_room() == room &&
                   interaction_id_part_one() == int_finished_one &&
                   interaction_id_part_two() == int_finished_two &&
                   prev(interaction_id_part_one()) == int_one &&
@@ -870,6 +880,7 @@ achievement_triggered_interaction(
     "Top Floor!",
     "Reach the top floor of the facility.",
     5,
+    room_cloning_entrance,
     int_top_floor_one,
     int_top_floor_two
 )
@@ -877,6 +888,7 @@ achievement_triggered_interaction(
     "Picky Eater [m]",
     "Discover Raz's favorite food in the cafeteria.",
     1,
+    room_cafeteria,
     int_food_one,
     int_food_two
 )
@@ -884,10 +896,18 @@ achievement_triggered_interaction(
     "Original Ra Ka [m]",
     "Read the signature on the painting in the Lounge.",
     1,
+    room_lounge,
     int_sig_one,
     int_sig_two
 )
-
+achievement_triggered_interaction(
+    "Lystran no Longer",
+    "Complete the game.",
+    10,
+    room_hangar,
+    int_beat_game_one,
+    int_beat_game_two
+)
 // Use for achievements related to the power puzzle in the control room
 function achievement_power(title, power_name, points, power_on, power_off_one, power_off_two)
 {
@@ -922,12 +942,18 @@ function achievement_underpar_event(title, remaining, room, start_event, end_eve
                        start_event() == 1 &&
                        prev(start_event()) == 0
                   ) &&
-                  trigger_when(end_event() == 1 && prev(end_event()) == 0) &&
-                  disable_when(current_health() < remaining, until=current_room() == title_screen)
+                  trigger_when(
+                      end_event() == 1 && 
+                      prev(end_event()) == 0
+                  ) &&
+                  disable_when(
+                      current_health() < remaining, 
+                      until=current_room() == title_screen
+                  )
     )
 }
 achievement_underpar_event(
-    "Refrigeration Room", 
+    "Room Temperature", 
     90, 
     room_refrigeration, 
     event_player_control, 
@@ -935,36 +961,33 @@ achievement_underpar_event(
 )
 
 // Use for achievements with "complete event x with y health remaining" requirement
-// when x is not represented by an event flag in memory.
-function achievement_underpar_interaction(title, remaining, room, start_id_one, start_id_two, end_id_one, end_id_two)
+function achievement_underpar_interaction(title, remaining, room)
 {
     achievement(
         title = "OverAchiever: " + title + " [m]",
         description = "Complete the " + title + " event with " + 
                       remaining + "% or more life remaining.",
         points = 5,
-        trigger = once(current_room() == room &&
-                       interaction_id_part_one() == int_finished_one &&
-                       interaction_id_part_two() == int_finished_two &&
-                       prev(interaction_id_part_one()) == start_id_one &&
-                       prev(interaction_id_part_two()) == start_id_two
+        trigger = once(
+                      current_room() == room &&
+                      in_combat() == 1 &&
+                      prev(in_combat()) == 0
                   ) &&
-                  trigger_when(interaction_id_part_one() == int_finished_one &&
-                               interaction_id_part_two() == int_finished_two &&
-                               prev(interaction_id_part_one()) == end_id_one &&
-                               prev(interaction_id_part_two()) == end_id_two
+                  trigger_when(
+                      current_room() == room && 
+                      in_combat() == 0 &&
+                      prev(in_combat()) == 1
                   ) &&
-                  disable_when(current_health() < remaining, until=current_room() == title_screen)
+                  disable_when(
+                      current_health() < remaining, 
+                      until=current_room() == title_screen
+                  )
     )
 }
 achievement_underpar_interaction(
     "Raz Sandwich", 
     80, 
-    room_broken_door, 
-    int_door_crush_one, 
-    int_door_crush_two, 
-    int_switches_one,
-    int_switches_two
+    room_broken_door
 )
 
 // Use for damageless achievements
@@ -974,9 +997,20 @@ function achievement_nodamage(title, location, points, room)
         title = "OverAchiever: " + title + " [m]",
         description = "Complete the " + location + " encounter without taking damage.",
         points = points,
-        trigger = once(current_room() == room && in_combat() == 1) &&
-                  trigger_when(current_room() == room && in_combat() == 0 && prev(in_combat()) == 1) &&
-                  disable_when(current_health() < prev(current_health()), until=current_room() == title_screen)
+        trigger = once(
+                      current_room() == room && 
+                      in_combat() == 1 &&
+                      prev(in_combat()) == 0
+                  ) &&
+                  trigger_when(
+                      current_room() == room && 
+                      in_combat() == 0 && 
+                      prev(in_combat()) == 1
+                  ) &&
+                  disable_when(
+                      current_health() < prev(current_health()),
+                      until=current_room() == title_screen
+                  )
     )
 }
 achievement_nodamage("Lab Battle", "laboratory", 5, room_laboratory)
@@ -991,13 +1025,25 @@ achievement(
     title = "OverAchiever: Nitro Fueled [m]",
     description = "Complete the hangar encounter without taking damage.",
     points = 25,
-    trigger = once(current_room() == room_hangar && in_combat() == 1) &&
+    trigger = once(
+                  current_room() == room_hangar && 
+                  in_combat() == 1 && 
+                  prev(in_combat()) == 0 &&
+                  event_queued_milly() != 1
+              ) &&
               trigger_when(
                   current_room() == room_hangar && 
-                  event_completed_game() == 1 &&
-                  prev(event_completed_game()) == 0
+                  interaction_id_part_one() == int_beat_game_one &&
+                  interaction_id_part_two() == int_beat_game_two &&
+                  (
+                      prev(interaction_id_part_one()) != int_beat_game_one ||
+                      prev(interaction_id_part_two()) != int_beat_game_two
+                  )
               ) &&
-              disable_when(current_health() < prev(current_health()), until=current_room() == title_screen)
+              disable_when(
+                  current_health() < prev(current_health()), 
+                  until=current_room() == title_screen
+              )
 )
 
 // One-off for hovercraft event, stricter requirements
@@ -1005,13 +1051,21 @@ achievement(
     title = "OverAchiever: Nerves of Stone [m]",
     description = "Complete the cave dodge event without taking damage or jumping.",
     points = 10,
-    trigger = once(current_room() == room_cave_dodge && in_combat() == 1) &&
-              trigger_when(
-                  current_room() == room_hover_north && 
-                  in_combat() == 0 && 
-                  prev(in_combat()) == 1
+    trigger = once(
+                  current_room() == room_cave_dodge && 
+                  interaction_id_part_one() == int_finished_one &&
+                  interaction_id_part_two() == int_finished_two &&
+                  prev(interaction_id_part_one()) == int_rock_dodge_one &&
+                  prev(interaction_id_part_two()) == int_rock_dodge_two &&
+                  in_combat() == 1
               ) &&
-              disable_when(
+              trigger_when(
+                  current_room() == room_cave_dodge &&
+                  interaction_id_part_one() == int_dodge_finished_one &&
+                  interaction_id_part_two() == int_dodge_finished_two &&
+                  in_combat() == 0
+              ) &&
+              disable_when(      
                   current_health() < prev(current_health()) || 
                   square_pressed() == 1,
                   until=current_room() == title_screen
@@ -1024,10 +1078,15 @@ achievement(
     description = "Complete the finale with 250 or more seconds remaining.",
     points = 10,
     trigger = current_room() == room_hangar && 
-              event_completed_game() == 1 &&
-              prev(event_completed_game()) == 0 &&
+              interaction_id_part_one() == int_beat_game_one &&
+              interaction_id_part_two() == int_beat_game_two &&
+              (
+                  prev(interaction_id_part_one()) != int_beat_game_one ||
+                  prev(interaction_id_part_two()) != int_beat_game_two
+              ) &&
               finale_time() >= 250
 )
+
 
 // Use for "obtain all of x item type" achievement
 function achievement_all_items(title, item_name, points, item_list)
@@ -1044,6 +1103,8 @@ achievement_all_items("Up Your Arsenal", "hand gun clip", 3, all_clips)
 achievement_all_items("Pharmacist", "emergency spray", 3, all_sprays)
 
 // Control all three characters in one session
+// Updated: control changes to Milly by default for a couple of seconds during a cutscene.
+// added an unless call to prevent that from happening.
 achievement(
     title = "Three Gadgeteers [m]",
     description = "In a single session, take control of every playable character.",
@@ -1054,6 +1115,11 @@ achievement(
                       once(current_character() == character_pipo),
                       once(current_character() == character_milly)
                   )
+              ) &&
+              unless(
+                  current_room() == room_sterilization &&
+                  interaction_id_part_one() == int_sterilization_one &&
+                  interaction_id_part_two() == int_sterilization_two
               ) &&
               never(current_room() == title_screen)
 )
@@ -1074,8 +1140,10 @@ achievement(
     description = "Beat the game in under 2 hours.",
     points = 10,
     trigger = current_room() == room_hangar &&
-              event_completed_game() == 1 &&
-              prev(event_completed_game()) == 0 &&
+              interaction_id_part_one() == int_finished_one &&
+              interaction_id_part_two() == int_finished_two &&
+              prev(interaction_id_part_one()) == int_beat_game_one &&
+              prev(interaction_id_part_two()) == int_beat_game_two &&
               elapsed_time() < two_hours_in_frames
 )
 
@@ -1084,11 +1152,16 @@ achievement(
     title = "King's Blood [m]",
     description = "In a single session, complete the game without leaving first-person (forced perspective rooms OK).",
     points = 25,
-    trigger = once(current_room() == room_refrigeration && event_player_control() == 1) &&
+    trigger = once(
+                  current_room() == room_refrigeration && 
+                  event_player_control() == 1
+              ) &&
               trigger_when(
                   current_room() == room_hangar && 
-                  event_completed_game() == 1 &&
-                  prev(event_completed_game()) == 0
+                  interaction_id_part_one() == int_finished_one &&
+                  interaction_id_part_two() == int_finished_two &&
+                  prev(interaction_id_part_one()) == int_beat_game_one &&
+                  prev(interaction_id_part_two()) == int_beat_game_two
               ) &&
               disable_when(
                   perspective() != 2 && event_aux_power() == 1,
@@ -1104,10 +1177,19 @@ achievement(
     trigger = once(current_room() == room_refrigeration && event_player_control() == 1) &&
               trigger_when(
                   current_room() == room_hangar &&
-                  event_completed_game() == 1 &&
-                  prev(event_completed_game()) == 0
+                  interaction_id_part_one() == int_finished_one &&
+                  interaction_id_part_two() == int_finished_two &&
+                  prev(interaction_id_part_one()) == int_beat_game_one &&
+                  prev(interaction_id_part_two()) == int_beat_game_two
               ) &&
-              disable_when(clips_remaining() < prev(clips_remaining()) || loaded_bullets() < prev(loaded_bullets()))
+              disable_when(
+                  in_combat() == 1 &&
+                  (
+                      clips_remaining() < prev(clips_remaining()) || 
+                      loaded_bullets() < prev(loaded_bullets())
+                  ),
+                  until=current_room() == title_screen
+              )
 )
 
 // Rich presence lookup for player location
@@ -1255,9 +1337,15 @@ leaderboard_fastest_encounter(
 leaderboard(
     title="UnderPar: Nitro Fueled",
     description="Complete the hangar encounter as fast as possible.",
-    start=current_room() == room_hangar && in_combat() == 1 && prev(in_combat()) == 0,
+    start=current_room() == room_hangar && in_combat() == 1 && prev(in_combat()) == 0 && event_queued_milly() == 0,
     cancel=current_room() == title_screen || current_health() == 0,
-    submit=current_room() == room_hangar && event_completed_game() == 1 && prev(event_completed_game()) == 0,
+    submit=current_room() == room_hangar && 
+           interaction_id_part_one() == int_beat_game_one && 
+           interaction_id_part_two() == int_beat_game_two &&
+           (
+               prev(interaction_id_part_one()) != int_beat_game_one ||
+               prev(interaction_id_part_two()) != int_beat_game_two
+           ),
     value=measured(
         tally(0,
             time_one() > prev(time_one())
@@ -1271,9 +1359,17 @@ leaderboard(
 leaderboard(
     title="UnderPar: Lystra Labyrinth",
     description="Complete the game as fast as possible.",
-    start=current_room() == room_hangar && event_completed_game() == 1 && prev(event_completed_game()) == 0,
+    start=current_room() == room_hangar && 
+          interaction_id_part_one() == int_finished_one && 
+          interaction_id_part_two() == int_finished_two &&
+          prev(interaction_id_part_one()) == int_beat_game_one &&
+          prev(interaction_id_part_two()) == int_beat_game_two,
     cancel=always_false(),
-    submit=current_room() == room_hangar && event_completed_game() == 1 && prev(event_completed_game()) == 0,
+    submit=current_room() == room_hangar && 
+          interaction_id_part_one() == int_finished_one && 
+          interaction_id_part_two() == int_finished_two &&
+          prev(interaction_id_part_one()) == int_beat_game_one &&
+          prev(interaction_id_part_two()) == int_beat_game_two,
     value=elapsed_time(),
     format="FRAMES",
     lower_is_better=true
